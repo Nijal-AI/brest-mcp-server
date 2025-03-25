@@ -66,4 +66,25 @@ Proxy server listening on port 3000
 ## Notes
 - Activez l’environnement avant de lancer le serveur pour utiliser les bonnes dépendances.
 - Consultez `pyproject.toml` pour les dépendances spécifiques.
+
+## Intrégration avec Claude Desktop
+
+```json
+{
+  "allowDevTools": true,
+  "mcpServers": {
+    "brest-mcp": {
+      "command": "[ABSOLUTE_PATH_TO_UV]",
+      "args": [
+        "--directory",
+        "[ABSOLUTE_PATH_TO_REPO]/brest-mcp/brest-mcp",
+        "run",
+        "src/brest_mcp/server.py"
+      ]
+    }
+  }
+}
 ```
+
+<!--  uv run src/brest_mcp/server.py -->
+<!-- uvicorn brest-mcp:main -->
