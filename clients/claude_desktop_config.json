@@ -1,0 +1,30 @@
+{
+    "mcpServers": {
+      "brest-mcp": {
+        "command": "/Users/Ibrahim/Documents/Dev/Brest-mcp-server/brest-mcp/.venv/bin/python",
+        "args": [
+          "/Users/Ibrahim/Documents/Dev/Brest-mcp-server/brest-mcp/src/brest_mcp/server.py",
+          "--transport",
+          "sse",
+          "--port",
+          "3002"
+        ],
+        "env": {
+          "GTFS_VEHICLE_POSITIONS_URL": "https://proxy.transport.data.gouv.fr/resource/bibus-brest-gtfs-rt-vehicle-position",
+          "GTFS_TRIP_UPDATES_URL": "https://proxy.transport.data.gouv.fr/resource/bibus-brest-gtfs-rt-trip-update",
+          "GTFS_SERVICE_ALERTS_URL": "https://proxy.transport.data.gouv.fr/resource/bibus-brest-gtfs-rt-alerts",
+          "GTFS_STATIC_URL": "https://s3.eu-west-1.amazonaws.com/files.orchestra.ratpdev.com/networks/bibus/exports/medias.zip",
+          "OPEN_AGENDA_URL": "https://api.openagenda.com/v2/events?search=brest&limit=10&key=cf7141c803f746f0abec6bb1667d55e2",
+          "WEATHER_INFOCLIMAT_URL": "https://www.infoclimat.fr/public-api/gfs/json?_ll=48.4475,-4.4181&_auth=ARtTRAV7ByVec1FmAnRVfFU9BzIMegIlVCgDYA1oVyoDaFIzVTVcOlE%2FBnsHKFZgBypXNFphU2MCaVAoD31RMAFrUz8FbgdgXjFRNAItVX5VewdmDCwCJVQ1A2QNflc9A2dSKFU3XDZRNwZ6Bz5WZAcrVyhaZFNsAmVQNQ9nUTYBZFM1BWYHbV4uUSwCNFVmVTIHMwwxAj9UNQNkDWRXNwNgUmBVN1w3USAGZwc%2BVmcHPVc2Wm1TbwJkUCgPfVFLARFTKgUmBydeZFF1Ai9VNFU4BzM%3D&_c=38fc48e42684d2b24279d0b02e2d0713",
+          "GTFS_REFRESH_INTERVAL": "30",
+          "MCP_HOST": "127.0.0.1",
+          "MCP_PORT": "3002",
+          "NETWORK": "bibus",
+          "LOG_LEVEL": "INFO",
+          "PYTHONPATH": "/Users/Ibrahim/Documents/Dev/Brest-mcp-server/brest-mcp"
+        },
+        "cwd": "/Users/Ibrahim/Documents/Dev/Brest-mcp-server/brest-mcp"
+      }
+    }
+  }
+  
