@@ -1,0 +1,3 @@
+packaging==24.2
+pillow==11.1.0
+pywatchman==2.0.0
