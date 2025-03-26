@@ -8,6 +8,13 @@ from typing import Dict, List, Optional
 import json
 import logging
 
+# Import des modules pour les différentes sources de données
+from brest_mcp.parking_data import get_all_parkings_with_availability, get_parking_by_id, get_nearest_parkings
+from brest_mcp.maritime_data import get_next_tides, get_tide_by_date, get_current_tide_status
+from brest_mcp.air_quality_data import get_air_quality, get_air_quality_with_recommendations
+from brest_mcp.cycling_data import get_all_bike_parkings, get_cycling_routes, get_nearest_bike_parkings
+from brest_mcp.charging_stations_data import get_all_charging_stations, get_nearest_charging_stations
+
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
 
@@ -21,18 +28,24 @@ HOST = os.getenv("MCP_HOST", "localhost")
 PORT = int(os.getenv("MCP_PORT", "0"))
 
 # Initialiser le serveur MCP avec le nom et les paramètres réseau spécifiés
-mcp = FastMCP("TransitServer", host=HOST, port=PORT)
+mcp = FastMCP("BrestCityServer", host=HOST, port=PORT)
 
-# Cache en mémoire pour les données GTFS-RT avec timestamps
+# Cache en mémoire pour les données avec timestamps
 _cache = {
     "vehicle_positions": {"timestamp": 0, "data": None, "last_update": None},
     "trip_updates": {"timestamp": 0, "data": None, "last_update": None},
     "service_alerts": {"timestamp": 0, "data": None, "last_update": None},
-    "weather_infoclimat": {"timestamp": 0, "data": None, "last_update": None}
+    "weather_infoclimat": {"timestamp": 0, "data": None, "last_update": None},
+    "parkings": {"timestamp": 0, "data": None, "last_update": None},
+    "tides": {"timestamp": 0, "data": None, "last_update": None},
+    "air_quality": {"timestamp": 0, "data": None, "last_update": None},
+    "bike_parkings": {"timestamp": 0, "data": None, "last_update": None},
+    "cycling_routes": {"timestamp": 0, "data": None, "last_update": None},
+    "charging_stations": {"timestamp": 0, "data": None, "last_update": None}
 }
 
 def _fetch_feed(feed_type: str, is_json: bool = False, is_static: bool = False) -> Optional[any]:
-    """Récupère un flux GTFS-RT et le met en cache."""
+    """Récupère un flux de données et le met en cache."""
     now = datetime.now().timestamp()
     cache = _cache[feed_type]
     
@@ -47,20 +60,37 @@ def _fetch_feed(feed_type: str, is_json: bool = False, is_static: bool = False) 
             "trip_updates": TRIP_UPDATES_URL,
             "service_alerts": SERVICE_ALERTS_URL,
             "weather_infoclimat": WEATHER_INFOCLIMAT_URL
-        }[feed_type]
+        }.get(feed_type)
         
-        logging.info(f"Fetching {feed_type} from {url}")
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        
-        if is_json:
-            data = response.json()
-        elif is_static:
-            data = response.content
+        if not url:
+            # Pour les autres types de données, utiliser les fonctions spécifiques
+            if feed_type == "parkings":
+                data = get_all_parkings_with_availability()
+            elif feed_type == "tides":
+                data = get_next_tides(8)  # 8 prochaines marées
+            elif feed_type == "air_quality":
+                data = get_air_quality().get("data", {})
+            elif feed_type == "bike_parkings":
+                data = get_all_bike_parkings()
+            elif feed_type == "cycling_routes":
+                data = get_cycling_routes()
+            elif feed_type == "charging_stations":
+                data = get_all_charging_stations()
+            else:
+                return None
         else:
-            feed = gtfs_realtime_pb2.FeedMessage()
-            feed.ParseFromString(response.content)
-            data = feed
+            logging.info(f"Fetching {feed_type} from {url}")
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            
+            if is_json:
+                data = response.json()
+            elif is_static:
+                data = response.content
+            else:
+                feed = gtfs_realtime_pb2.FeedMessage()
+                feed.ParseFromString(response.content)
+                data = feed
         
         # Mettre à jour le cache
         cache["data"] = data
@@ -97,525 +127,259 @@ VEHICLE_POSITIONS_URL = os.getenv("GTFS_VEHICLE_POSITIONS_URL", NETWORK_URLS["bi
 TRIP_UPDATES_URL = os.getenv("GTFS_TRIP_UPDATES_URL", NETWORK_URLS["bibus"]["trip_updates"])
 SERVICE_ALERTS_URL = os.getenv("GTFS_SERVICE_ALERTS_URL", NETWORK_URLS["bibus"]["service_alerts"])
 
-def _get_vehicle_positions_data() -> List[Dict]:
-    """Récupère les positions de tous les véhicules."""
-    feed = _fetch_feed("vehicle_positions")
-    if feed:
-        return _parse_vehicle_positions(feed)
-    return []
+# Fonctions existantes pour les données GTFS-RT
+# [Insérer ici toutes les fonctions existantes pour le traitement des données GTFS-RT]
+# _get_vehicle_positions_data, _get_trip_updates_data, _get_service_alerts_data, etc.
 
-def _get_trip_updates_data() -> List[Dict]:
-    """Récupère les mises à jour de tous les trajets."""
-    feed = _fetch_feed("trip_updates")
-    if feed:
-        return _parse_trip_updates(feed)
-    return []
-
-def _get_service_alerts_data() -> List[Dict]:
-    """Récupère les alertes de service actives."""
-    feed = _fetch_feed("service_alerts")
-    if feed:
-        return _parse_service_alerts(feed)
-    return []
-
-def _parse_vehicle_positions(feed: gtfs_realtime_pb2.FeedMessage) -> List[Dict]:
-    """Transforme un FeedMessage de positions véhicules en une liste de dictionnaires."""
-    data = []
-    for entity in feed.entity:
-        if not entity.HasField('vehicle'):
-            continue
-        vp = entity.vehicle
-        vehicle_info = {}
-        vehicle_info["vehicle_id"] = entity.id or (vp.vehicle.id if vp.vehicle.HasField('id') else vp.vehicle.label)
-        if vp.position:
-            vehicle_info["latitude"] = vp.position.latitude
-            vehicle_info["longitude"] = vp.position.longitude
-            if vp.position.HasField('bearing'):
-                vehicle_info["bearing"] = vp.position.bearing
-            if vp.position.HasField('speed'):
-                vehicle_info["speed"] = vp.position.speed
-        if vp.trip:
-            vehicle_info["trip_id"] = vp.trip.trip_id
-            vehicle_info["route_id"] = vp.trip.route_id
-            vehicle_info["start_time"] = vp.trip.start_time
-            vehicle_info["start_date"] = vp.trip.start_date
-        if vp.HasField('timestamp'):
-            vehicle_info["timestamp"] = vp.timestamp
-        data.append(vehicle_info)
-    return data
-
-def _parse_trip_updates(feed: gtfs_realtime_pb2.FeedMessage) -> List[Dict]:
-    """Transforme un FeedMessage de mises à jour de trajets en une liste de dictionnaires."""
-    data = []
-    for entity in feed.entity:
-        if not entity.HasField('trip_update'):
-            continue
-        tu = entity.trip_update
-        trip_info = {}
-        trip_info["trip_id"] = tu.trip.trip_id
-        trip_info["route_id"] = tu.trip.route_id
-        trip_info["start_time"] = tu.trip.start_time
-        trip_info["start_date"] = tu.trip.start_date
-        if tu.vehicle and tu.vehicle.HasField('id'):
-            trip_info["vehicle_id"] = tu.vehicle.id
-        updates = []
-        for stu in tu.stop_time_update:
-            update_info = {}
-            if stu.stop_id:
-                update_info["stop_id"] = stu.stop_id
-            if stu.HasField('arrival') and stu.arrival.HasField('delay'):
-                update_info["arrival_delay"] = stu.arrival.delay
-            if stu.HasField('departure') and stu.departure.HasField('delay'):
-                update_info["departure_delay"] = stu.departure.delay
-            if stu.HasField('arrival') and stu.arrival.HasField('time'):
-                update_info["arrival_time"] = stu.arrival.time
-            if stu.HasField('departure') and stu.departure.HasField('time'):
-                update_info["departure_time"] = stu.departure.time
-            if stu.HasField('schedule_relationship'):
-                update_info["schedule_relationship"] = str(stu.schedule_relationship)
-            if update_info:
-                updates.append(update_info)
-        if updates:
-            trip_info["stop_time_updates"] = updates
-        data.append(trip_info)
-    return data
-
-def _parse_service_alerts(feed: gtfs_realtime_pb2.FeedMessage) -> List[Dict]:
-    """Transforme un FeedMessage d'alertes de service en une liste de dictionnaires."""
-    data = []
-    cause_map = {
-        1: "UNKNOWN_CAUSE", 2: "OTHER_CAUSE", 3: "TECHNICAL_PROBLEM", 4: "STRIKE",
-        5: "DEMONSTRATION", 6: "ACCIDENT", 7: "HOLIDAY", 8: "WEATHER",
-        9: "MAINTENANCE", 10: "CONSTRUCTION", 11: "POLICE_ACTIVITY", 12: "MEDICAL_EMERGENCY"
-    }
-    effect_map = {
-        1: "NO_SERVICE", 2: "REDUCED_SERVICE", 3: "SIGNIFICANT_DELAYS", 4: "DETOUR",
-        5: "ADDITIONAL_SERVICE", 6: "MODIFIED_SERVICE", 7: "OTHER_EFFECT",
-        8: "UNKNOWN_EFFECT", 9: "STOP_MOVED"
-    }
-    for entity in feed.entity:
-        if not entity.HasField('alert'):
-            continue
-        alert = entity.alert
-        alert_info = {}
-        alert_info["alert_id"] = entity.id
-        if alert.HasField('cause') and alert.cause in cause_map:
-            alert_info["cause"] = cause_map[alert.cause]
-        if alert.HasField('effect') and alert.effect in effect_map:
-            alert_info["effect"] = effect_map[alert.effect]
-        periods = []
-        for period in alert.active_period:
-            period_info = {}
-            if period.HasField('start'):
-                period_info["start"] = period.start
-            if period.HasField('end'):
-                period_info["end"] = period.end
-            if period_info:
-                periods.append(period_info)
-        if periods:
-            alert_info["active_periods"] = periods
-        routes = set()
-        stops = set()
-        for ie in alert.informed_entity:
-            if ie.HasField('route_id'):
-                routes.add(ie.route_id)
-            if ie.HasField('stop_id'):
-                stops.add(ie.stop_id)
-        if routes:
-            alert_info["routes"] = list(routes)
-        if stops:
-            alert_info["stops"] = list(stops)
-        description = None
-        if alert.description_text and alert.description_text.translation:
-            for translation in alert.description_text.translation:
-                if translation.language and translation.language.startswith("en"):
-                    description = translation.text
-                    break
-            if description is None:
-                description = alert.description_text.translation[0].text
-        if description:
-            alert_info["description"] = description
-        header = None
-        if alert.header_text and alert.header_text.translation:
-            for translation in alert.header_text.translation:
-                if translation.language and translation.language.startswith("en"):
-                    header = translation.text
-                    break
-            if header is None:
-                header = alert.header_text.translation[0].text
-        if header:
-            alert_info["header"] = header
-        data.append(alert_info)
-    return data
-
-def _parse_weather_infoclimat(data: Dict) -> Dict:
-    """Transforme les données Infoclimat en un dictionnaire structuré."""
-    forecasts = {}
-    for timestamp, values in data.items():
-        if timestamp.startswith("20"):  # Filtrer les timestamps valides
-            forecasts[timestamp] = {
-                "temperature_2m": values.get("temperature", {}).get("2m"),
-                "wind_speed": values.get("vent_moyen", {}).get("10m"),
-                "wind_gusts": values.get("vent_rafales", {}).get("10m"),
-                "wind_direction": values.get("vent_direction", {}).get("10m"),
-                "precipitation": values.get("pluie"),
-                "humidity": values.get("humidite", {}).get("2m"),
-                "pressure": values.get("pression", {}).get("niveau_de_la_mer")
-            }
-    return forecasts
-
-@mcp.tool("get_vehicles")
-def get_vehicle_positions():
-    """Charge et retourne les positions de tous les véhicules en temps réel."""
+# Nouvelles fonctions pour les données de parkings
+@mcp.tool("get_parkings")
+def get_parkings():
+    """Récupère tous les parkings avec leur disponibilité en temps réel."""
+    data = _fetch_feed("parkings")
     return {
         "status": "success",
-        "data": _get_vehicle_positions_data(),
-        "lastUpdate": _cache["vehicle_positions"]["last_update"]
+        "data": data or [],
+        "lastUpdate": _cache["parkings"]["last_update"]
     }
 
-@mcp.tool("get_trip_updates")
-def get_trip_updates():
-    """Charge et retourne toutes les mises à jour des trajets en temps réel."""
+@mcp.tool()
+def get_parking(parking_id: str):
+    """Récupère les informations d'un parking spécifique."""
+    return get_parking_by_id(parking_id)
+
+@mcp.tool()
+def find_nearest_parkings(latitude: float, longitude: float, max_distance: float = 1.0, limit: int = 5):
+    """Trouve les parkings les plus proches d'un point géographique."""
+    return get_nearest_parkings(latitude, longitude, max_distance, limit)
+
+# Nouvelles fonctions pour les données maritimes
+@mcp.tool("get_tides")
+def get_tides():
+    """Récupère les prochaines marées pour Brest."""
+    data = _fetch_feed("tides")
     return {
         "status": "success",
-        "data": _get_trip_updates_data(),
-        "lastUpdate": _cache["trip_updates"]["last_update"]
+        "data": data or [],
+        "lastUpdate": _cache["tides"]["last_update"]
     }
 
-@mcp.tool("get_alerts")
-def get_service_alerts():
-    """Charge et retourne toutes les alertes de service actives en temps réel."""
+@mcp.tool()
+def get_tide_status():
+    """Récupère le statut actuel de la marée (montante/descendante)."""
+    return get_current_tide_status()
+
+@mcp.tool()
+def get_tides_for_date(date: str):
+    """Récupère les marées pour une date spécifique."""
+    return get_tide_by_date(date)
+
+# Nouvelles fonctions pour les données de qualité de l'air
+@mcp.tool("get_air_quality")
+def get_air_quality_data():
+    """Récupère les données de qualité de l'air pour Brest."""
+    return get_air_quality_with_recommendations()
+
+# Nouvelles fonctions pour les données de vélos
+@mcp.tool("get_bike_parkings")
+def get_bike_parkings_data():
+    """Récupère tous les stationnements vélo."""
+    data = _fetch_feed("bike_parkings")
     return {
         "status": "success",
-        "data": _get_service_alerts_data(),
-        "lastUpdate": _cache["service_alerts"]["last_update"]
+        "data": data or [],
+        "lastUpdate": _cache["bike_parkings"]["last_update"]
     }
 
-@mcp.tool("get_weather_forecast")
-def get_weather_forecast():
-    """Récupère les prévisions météo pour Brest."""
-    data = _fetch_feed("weather_infoclimat", is_json=True)
+@mcp.tool("get_cycling_routes")
+def get_cycling_routes_data():
+    """Récupère toutes les pistes cyclables."""
+    data = _fetch_feed("cycling_routes")
     return {
-        "status": "success", 
-        "data": _parse_weather_infoclimat(data) if data else {}, 
-        "lastUpdate": _cache["weather_infoclimat"]["last_update"]
+        "status": "success",
+        "data": data or [],
+        "lastUpdate": _cache["cycling_routes"]["last_update"]
     }
 
 @mcp.tool()
-def get_vehicle(vehicle_id: str):
-    """Retourne les informations du véhicule spécifié par son identifiant."""
-    vehicles = _get_vehicle_positions_data()
-    for v in vehicles:
-        if str(v.get("vehicle_id")) == str(vehicle_id):
-            return v
-    return None
+def find_nearest_bike_parkings(latitude: float, longitude: float, max_distance: float = 1.0, limit: int = 5):
+    """Trouve les stationnements vélo les plus proches d'un point géographique."""
+    return get_nearest_bike_parkings(latitude, longitude, max_distance, limit)
+
+# Nouvelles fonctions pour les données de bornes de recharge
+@mcp.tool("get_charging_stations")
+def get_charging_stations_data():
+    """Récupère toutes les bornes de recharge électrique."""
+    data = _fetch_feed("charging_stations")
+    return {
+        "status": "success",
+        "data": data or [],
+        "lastUpdate": _cache["charging_stations"]["last_update"]
+    }
 
 @mcp.tool()
-def get_trip_update(trip_id: str):
-    """Retourne les informations de mise à jour du trajet spécifié."""
-    trips = _get_trip_updates_data()
-    for t in trips:
-        if t.get("trip_id") == trip_id:
-            return t
-    return None
+def find_nearest_charging_stations(latitude: float, longitude: float, max_distance: float = 5.0, limit: int = 5):
+    """Trouve les bornes de recharge les plus proches d'un point géographique."""
+    return get_nearest_charging_stations(latitude, longitude, max_distance, limit)
 
-@mcp.tool()
-def get_alert(alert_id: str):
-    """Retourne les détails de l'alerte de service spécifiée."""
-    alerts = _get_service_alerts_data()
-    for a in alerts:
-        if a.get("alert_id") == alert_id:
-            return a
-    return None
+# Ressources MCP pour les nouvelles données
+@mcp.resource("brest://parkings")
+def parkings_resource():
+    """Ressource pour tous les parkings."""
+    return get_parkings()
 
-@mcp.tool()
-def get_weather_by_timestamp(timestamp: str):
-    """Récupère les prévisions météo pour un timestamp spécifique (format ISO)."""
-    data = _fetch_feed("weather_infoclimat", is_json=True)
-    forecasts = _parse_weather_infoclimat(data) if data else {}
-    return forecasts.get(timestamp, None)
+@mcp.resource("brest://parking/{parking_id}")
+def parking_resource(parking_id: str):
+    """Ressource pour un parking spécifique."""
+    parking = get_parking(parking_id)
+    return {
+        "status": "success" if parking else "error",
+        "data": parking or {},
+        "message": None if parking else f"Parking {parking_id} non trouvé"
+    }
 
-@mcp.tool()
-def count_vehicles():
-    """Retourne le nombre de véhicules actuellement suivis."""
-    vehicles = _get_vehicle_positions_data()
-    return len(vehicles)
+@mcp.resource("brest://tides")
+def tides_resource():
+    """Ressource pour les marées."""
+    return get_tides()
 
-@mcp.tool()
-def count_alerts():
-    """Retourne le nombre d'alertes de service actives."""
-    alerts = _get_service_alerts_data()
-    return len(alerts)
+@mcp.resource("brest://tides/current")
+def current_tide_resource():
+    """Ressource pour le statut actuel de la marée."""
+    return get_tide_status()
 
-@mcp.tool()
-def find_trips_by_route(route_id: str):
-    """Liste les identifiants des trajets en cours pour la ligne donnée."""
-    trips = _get_trip_updates_data()
-    return [t["trip_id"] for t in trips if t.get("route_id") == route_id]
+@mcp.resource("brest://tides/{date}")
+def tides_by_date_resource(date: str):
+    """Ressource pour les marées d'une date spécifique."""
+    tides = get_tides_for_date(date)
+    return {
+        "status": "success",
+        "data": tides,
+        "date": date
+    }
 
-@mcp.tool()
-def find_vehicles_by_route(route_id: str) -> List[Dict]:
-    """Trouve tous les véhicules sur une ligne spécifique."""
-    vehicles = []
-    feed = _fetch_feed("vehicle_positions")
-    if not feed:
-        return vehicles
-        
-    for entity in feed.entity:
-        if entity.HasField('vehicle'):
-            vp = entity.vehicle
-            if vp.HasField('trip') and vp.trip.HasField('route_id') and vp.trip.route_id == route_id:
-                vehicle_info = {
-                    "vehicle_id": vp.vehicle.id if vp.vehicle.HasField('id') else vp.vehicle.label,
-                    "position": {
-                        "latitude": vp.position.latitude,
-                        "longitude": vp.position.longitude,
-                        "bearing": vp.position.bearing if vp.position.HasField('bearing') else None,
-                        "speed": vp.position.speed if vp.position.HasField('speed') else None
-                    },
-                    "trip_id": vp.trip.trip_id,
-                    "current_status": vp.current_status if vp.HasField('current_status') else None,
-                    "timestamp": vp.timestamp if vp.HasField('timestamp') else None
-                }
-                vehicles.append(vehicle_info)
-    return vehicles
+@mcp.resource("brest://air-quality")
+def air_quality_resource():
+    """Ressource pour la qualité de l'air."""
+    return get_air_quality_data()
 
-@mcp.tool()
-def find_alerts_by_route(route_id: str) -> List[Dict]:
-    """Trouve toutes les alertes pour une ligne spécifique."""
-    alerts = []
-    feed = _fetch_feed("service_alerts")
-    if not feed:
-        return alerts
-        
-    for entity in feed.entity:
-        if entity.HasField('alert'):
-            alert = entity.alert
-            # Vérifie si l'alerte concerne cette ligne
-            for informed_entity in alert.informed_entity:
-                if informed_entity.HasField('route_id') and informed_entity.route_id == route_id:
-                    alert_info = {
-                        "id": entity.id,
-                        "effect": alert.effect,
-                        "header": alert.header_text.translation[0].text if alert.header_text.translation else None,
-                        "description": alert.description_text.translation[0].text if alert.description_text.translation else None,
-                        "start": alert.active_period[0].start if alert.active_period else None,
-                        "end": alert.active_period[0].end if alert.active_period else None
-                    }
-                    alerts.append(alert_info)
-                    break
-    return alerts
+@mcp.resource("brest://bike-parkings")
+def bike_parkings_resource():
+    """Ressource pour les stationnements vélo."""
+    return get_bike_parkings_data()
 
-@mcp.resource("gtfs://vehicles")
-def vehicles_resource() -> Dict:
-    """Liste tous les véhicules actifs."""
-    return get_vehicle_positions()
+@mcp.resource("brest://cycling-routes")
+def cycling_routes_resource():
+    """Ressource pour les pistes cyclables."""
+    return get_cycling_routes_data()
 
-@mcp.resource("gtfs://vehicle/{vehicle_id}")
-def vehicle_resource(vehicle_id: str) -> Dict:
-    """Détails d'un véhicule spécifique."""
-    return get_vehicle(vehicle_id)
+@mcp.resource("brest://charging-stations")
+def charging_stations_resource():
+    """Ressource pour les bornes de recharge électrique."""
+    return get_charging_stations_data()
 
-@mcp.resource("gtfs://route/{route_id}")
-def route_resource(route_id: str) -> Dict:
-    """État d'une ligne spécifique."""
-    vehicles = find_vehicles_by_route(route_id)
-    alerts = find_alerts_by_route(route_id)
+@mcp.resource("brest://nearest/{type}/{latitude}/{longitude}")
+def nearest_resource(type: str, latitude: float, longitude: float):
+    """
+    Ressource pour trouver les équipements les plus proches d'un point géographique.
     
-    return {
-        "status": "success",
-        "data": {
-            "route_id": route_id,
-            "vehicles": vehicles,
-            "alerts": alerts,
-            "statistics": {
-                "vehicle_count": len(vehicles),
-                "alert_count": len(alerts)
-            },
-            "timestamp": datetime.now().isoformat()
+    Args:
+        type: Type d'équipement (parking, bike-parking, charging-station)
+        latitude: Latitude du point
+        longitude: Longitude du point
+    """
+    max_distance = 1.0  # Valeur par défaut
+    limit = 5  # Valeur par défaut
+    
+    if type == "parking":
+        data = find_nearest_parkings(latitude, longitude, max_distance, limit)
+    elif type == "bike-parking":
+        data = find_nearest_bike_parkings(latitude, longitude, max_distance, limit)
+    elif type == "charging-station":
+        data = find_nearest_charging_stations(latitude, longitude, max_distance, limit)
+    else:
+        return {
+            "status": "error",
+            "message": f"Type {type} non reconnu. Types disponibles : parking, bike-parking, charging-station"
         }
-    }
-
-@mcp.resource("gtfs://network/stats")
-def network_stats_resource() -> Dict:
-    """Statistiques du réseau."""
-    return {
-        "status": "success",
-        "data": _get_network_statistics()
-    }
-
-@mcp.resource("gtfs://weather")
-def weather_resource():
-    """Ressource pour les prévisions météo."""
-    return get_weather_forecast()
-
-@mcp.resource("gtfs://weather/{timestamp}")
-def weather_by_timestamp_resource(timestamp: str):
-    """Ressource pour les prévisions météo à un moment spécifique."""
-    forecast = get_weather_by_timestamp(timestamp)
-    return {
-        "status": "success" if forecast else "error",
-        "data": forecast or {},
-        "timestamp": timestamp,
-        "message": None if forecast else "Aucune prévision disponible pour ce timestamp"
-    }
-
-def _get_network_statistics() -> Dict:
-    """Calcule des statistiques sur l'état du réseau."""
-    vehicles = _get_vehicle_positions_data()
-    trips = _get_trip_updates_data()
-    
-    return {
-        "totalVehicles": len(vehicles),
-        "vehiclesByStatus": _count_vehicles_by_status(vehicles),
-        "averageDelay": _calculate_average_delay(trips),
-        "routesWithAlerts": len(set(alert.get("route_id") for alert in _get_service_alerts_data())),
-        "onTimePerformance": _calculate_on_time_performance(trips)
-    }
-
-def _count_vehicles_by_status(vehicles: List[Dict]) -> Dict:
-    """Compte les véhicules par statut."""
-    status_count = {"IN_TRANSIT": 0, "STOPPED": 0, "UNKNOWN": 0}
-    for vehicle in vehicles:
-        current_status = vehicle.get("currentStatus", "UNKNOWN")
-        status_count[current_status] = status_count.get(current_status, 0) + 1
-    return status_count
-
-def _calculate_average_delay(trips: List[Dict]) -> float:
-    """Calcule le retard moyen sur l'ensemble du réseau."""
-    delays = [
-        stop.get("arrival_delay", 0)
-        for trip in trips
-        for stop in trip.get("stop_time_updates", [])
-    ]
-    return sum(delays) / len(delays) if delays else 0
-
-def _calculate_on_time_performance(trips: List[Dict], threshold: int = 180) -> float:
-    """Calcule le pourcentage de véhicules à l'heure (retard < seuil)."""
-    total = 0
-    on_time = 0
-    
-    for trip in trips:
-        for stop in trip.get("stop_time_updates", []):
-            total += 1
-            if abs(stop.get("arrival_delay", 0)) < threshold:
-                on_time += 1
-    
-    return (on_time / total * 100) if total > 0 else 100
-
-def _get_trip_details(trip_id: str) -> Optional[Dict]:
-    """Récupère les détails d'un trajet spécifique."""
-    if not trip_id:
-        return None
-        
-    trips = _get_trip_updates_data()
-    for trip in trips:
-        if trip.get("trip_id") == trip_id:
-            return trip
-    return None
-
-def _get_vehicle_alerts(vehicle_id: str) -> List[Dict]:
-    """Récupère les alertes affectant un véhicule spécifique."""
-    alerts = _get_service_alerts_data()
-    return [
-        alert for alert in alerts
-        if vehicle_id in [ie.vehicle_id for ie in alert.informed_entity if ie.HasField('vehicle_id')]
-    ]
-
-def _get_route_delays(route_id: str) -> Dict:
-    """Calcule les statistiques de retard pour une ligne spécifique."""
-    trips = _get_trip_updates_data()
-    route_trips = [
-        trip for trip in trips
-        if trip.get("route_id") == route_id
-    ]
-    
-    delays = []
-    for trip in route_trips:
-        for stop in trip.get("stop_time_updates", []):
-            delay = stop.get("arrival_delay", 0)
-            delays.append(delay)
-    
-    return {
-        "averageDelay": sum(delays) / len(delays) if delays else 0,
-        "maxDelay": max(delays) if delays else 0,
-        "minDelay": min(delays) if delays else 0,
-        "delayedStops": len([d for d in delays if d > 180])
-    }
-
-def _get_network_feed(network: str, feed_type: str) -> Optional[gtfs_realtime_pb2.FeedMessage]:
-    """Récupère un flux GTFS-RT pour un réseau spécifique."""
-    if network not in NETWORK_URLS:
-        return None
-        
-    try:
-        url = NETWORK_URLS[network][feed_type]
-        logging.info(f"Fetching {feed_type} from {network} at {url}")
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        
-        feed = gtfs_realtime_pb2.FeedMessage()
-        feed.ParseFromString(response.content)
-        logging.info(f"Successfully fetched {network} {feed_type} with {len(feed.entity)} entities")
-        return feed
-    except Exception as e:
-        logging.error(f"Error fetching {network} {feed_type}: {str(e)}")
-        return None
-
-@mcp.resource("gtfs://network/{network}/vehicles")
-def network_vehicles_resource(network: str) -> Dict:
-    """Liste tous les véhicules d'un réseau spécifique."""
-    feed = _get_network_feed(network, "vehicle_positions")
-    if not feed:
-        return {"status": "error", "message": f"Réseau {network} non trouvé ou données indisponibles"}
-    
-    vehicles = []
-    for entity in feed.entity:
-        if entity.HasField('vehicle'):
-            vp = entity.vehicle
-            vehicle_info = {
-                "vehicle_id": vp.vehicle.id if vp.vehicle.HasField('id') else vp.vehicle.label,
-                "position": {
-                    "latitude": vp.position.latitude,
-                    "longitude": vp.position.longitude,
-                    "bearing": vp.position.bearing if vp.position.HasField('bearing') else None,
-                    "speed": vp.position.speed if vp.position.HasField('speed') else None
-                },
-                "trip_id": vp.trip.trip_id if vp.HasField('trip') else None,
-                "route_id": vp.trip.route_id if vp.HasField('trip') else None,
-                "current_status": vp.current_status if vp.HasField('current_status') else None,
-                "timestamp": vp.timestamp if vp.HasField('timestamp') else None
-            }
-            vehicles.append(vehicle_info)
     
     return {
         "status": "success",
-        "network": network,
-        "data": vehicles,
-        "count": len(vehicles),
+        "type": type,
+        "data": data,
+        "count": len(data),
+        "coordinates": {
+            "latitude": latitude,
+            "longitude": longitude
+        },
+        "max_distance": max_distance,
         "timestamp": datetime.now().isoformat()
     }
 
-@mcp.resource("gtfs://networks")
-def available_networks_resource() -> Dict:
-    """Liste tous les réseaux disponibles."""
-    networks = []
-    for network, urls in NETWORK_URLS.items():
-        networks.append({
-            "id": network,
-            "name": {
-                "bibus": "Bibus (Brest)",
-                "star": "STAR (Rennes)",
-                "tub": "TUB (Saint-Brieuc)"
-            }.get(network, network),
-            "urls": urls
-        })
-    
-    return {
-        "status": "success",
-        "data": networks,
-        "count": len(networks)
-    }
+@mcp.resource("brest://city-data")
+def city_data_resource():
+    """
+    Ressource regroupant les principales données de la ville.
+    Fournit un aperçu global des différentes sources de données disponibles.
+    """
+    # Récupère un échantillon de chaque type de données
+    try:
+        weather = _fetch_feed("weather_infoclimat", is_json=True)
+        weather_data = _parse_weather_infoclimat(weather) if weather else {}
+        current_weather = next(iter(weather_data.values())) if weather_data else {}
+        
+        vehicles = _get_vehicle_positions_data()
+        vehicle_count = len(vehicles)
+        
+        alerts = _get_service_alerts_data()
+        alert_count = len(alerts)
+        
+        parkings = _fetch_feed("parkings")
+        parking_count = len(parkings) if parkings else 0
+        
+        tides = get_current_tide_status()
+        
+        air_quality = get_air_quality().get("data", {})
+        
+        charging_stations = _fetch_feed("charging_stations")
+        charging_count = len(charging_stations) if charging_stations else 0
+        
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "data": {
+                "weather": {
+                    "temperature": current_weather.get("temperature_2m"),
+                    "wind_speed": current_weather.get("wind_speed"),
+                    "humidity": current_weather.get("humidity"),
+                    "precipitation": current_weather.get("precipitation")
+                },
+                "transport": {
+                    "active_vehicles": vehicle_count,
+                    "alerts": alert_count
+                },
+                "parkings": {
+                    "count": parking_count,
+                    "available": sum(p.get("availability", {}).get("available_spaces", 0) for p in parkings) if parkings else 0
+                },
+                "maritime": {
+                    "tide_status": tides.get("tide_direction"),
+                    "water_level": tides.get("current_level")
+                },
+                "environment": {
+                    "air_quality_index": air_quality.get("aqi"),
+                    "air_quality_level": air_quality.get("level")
+                },
+                "mobility": {
+                    "charging_stations": charging_count
+                }
+            }
+        }
+    except Exception as e:
+        logging.error(f"Error generating city data: {str(e)}")
+        return {
+            "status": "error",
+            "message": "Error generating city data"
+        }
 
 if __name__ == "__main__":
     # Configuration du logging
