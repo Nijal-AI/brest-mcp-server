@@ -25,7 +25,7 @@ SERVICE_ALERTS_URL = os.getenv("GTFS_SERVICE_ALERTS_URL")
 WEATHER_INFOCLIMAT_URL = os.getenv("WEATHER_INFOCLIMAT_URL", "https://www.infoclimat.fr/public-api/gfs/json?_ll=48.4475,-4.4181&_auth=ARtTRAV7ByVec1FmAnRVfFU9BzIMegIlVCgDYA1oVyoDaFIzVTVcOlE%2FBnsHKFZgBypXNFphU2MCaVAoD31RMAFrUz8FbgdgXjFRNAItVX5VewdmDCwCJVQ1A2QNflc9A2dSKFU3XDZRNwZ6Bz5WZAcrVyhaZFNsAmVQNQ9nUTYBZFM1BWYHbV4uUSwCNFVmVTIHMwwxAj9UNQNkDWRXNwNgUmBVN1w3USAGZwc%2BVmcHPVc2Wm1TbwJkUCgPfVFLARFTKgUmBydeZFF1Ai9VNFU4BzM%3D&_c=38fc48e42684d2b24279d0b02e2d0713")
 REFRESH_INTERVAL = int(os.getenv("GTFS_REFRESH_INTERVAL", "30"))
 HOST = os.getenv("MCP_HOST", "localhost")
-PORT = int(os.getenv("MCP_PORT", "0"))
+PORT = int(os.getenv("MCP_PORT", "3002"))
 
 # Initialiser le serveur MCP avec le nom et les paramètres réseau spécifiés
 mcp = FastMCP("BrestCityServer", host=HOST, port=PORT)
