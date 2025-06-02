@@ -81,6 +81,27 @@ If you want to discut with an AI agent using the Brest MCP Server, you can use t
 uv run python tools/client.py src/server.py
 ```
 
+## Agent
+You can also chat with an AI agent using Brest MCP Server on A2A protocol.
+To setup the agent :
+```bash
+echo "MCP_TRANSPORT=stdio" > src/.env
+echo "GOOGLE_API_KEY=your_api_key_here" > src/.env
+```
+To run the agent :
+```bash
+uv run agent
+```
+You can try to use this agent with the demo ui of a2a-samples repository :
+```bash
+git clone https://github.com/google-a2a/a2a-samples.git # One time
+
+cd a2a-samples/demo/ui
+uv run main.py
+```
+Then go to `localhost:12000` and go to "Agents" and connect your Brest Expert Agent `localhost:10030`
+You can add other agents if you want and go to Home and create a new conversation. You can now discuss with your agent(s).
+
 ## Development
 For developers wishing to contribute or work on advanced features, follow these additional steps:
 

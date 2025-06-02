@@ -23,6 +23,8 @@ dependencies = [
     "langgraph-prebuilt>=0.1.8",
     "langgraph>=0.4.5",
     "langchain-openai>=0.3.17",
+    "a2a-sdk>=0.2.4",
+    "langchain-google-genai>=2.0.10",
 ]
 [[project.authors]]
 name = "Artemis-IA"
