@@ -8,16 +8,11 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables.config import (
     RunnableConfig,
 )
-from langchain_core.tools import tool
-# from langchain_openai import AzureChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from mcp import ClientSession, StdioServerParameters  # type: ignore
-from mcp.client.stdio import stdio_client
+from langchain_anthropic import ChatAnthropic
 from pydantic import BaseModel
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent  # type: ignore
-from langchain_mcp_adapters.tools import load_mcp_tools
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 logger = logging.getLogger(__name__)
@@ -62,7 +57,7 @@ class BrestExpertAgent:
         return tools
    
     def __init__(self):
-        self.model = ChatGoogleGenerativeAI(model='gemini-2.0-flash-lite')
+        self.model = ChatAnthropic(model='claude-3-5-sonnet-20241022')
         tools=asyncio.run(self.get_tools())
         self.agent = create_react_agent(self.model, tools, checkpointer=memory,prompt=self.SYSTEM_INSTRUCTION,response_format=ResponseFormat,)
 

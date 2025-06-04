@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 class BrestAgentExecutor(AgentExecutor):
-    """Currency Conversion AgentExecutor Example."""
 
     def __init__(self):
         self.agent = BrestExpertAgent()

@@ -12,7 +12,6 @@ from a2a.types import (
     AgentSkill,
 )
 
-from brestagent import BrestExpertAgent
 from agent_executor import BrestAgentExecutor
 
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +36,7 @@ def main(host, port):
   )
   agent_card = AgentCard(
     name="Brest Expert Agent",
-    description="Cet agent peut répondre à des questions sur la ville de Brest",
+    description="Cet agent peut répondre à des questions sur les transports en commun, la météo, les événements et les alertes de service et retards de lignes de Brest.",
     url=f"http://{host}:{port}/",
     version="0.1.0",
     defaultInputModes=["text"],

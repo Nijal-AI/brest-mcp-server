@@ -86,7 +86,6 @@ You can also chat with an AI agent using Brest MCP Server on A2A protocol.
 To setup the agent :
 ```bash
 echo "MCP_TRANSPORT=stdio" > src/.env
-echo "GOOGLE_API_KEY=your_api_key_here" > src/.env
 ```
 To run the agent :
 ```bash
@@ -94,8 +93,11 @@ uv run agent
 ```
 You can try to use this agent with the demo ui of a2a-samples repository :
 ```bash
-git clone https://github.com/google-a2a/a2a-samples.git # One time
+# Setup
+git clone https://github.com/google-a2a/a2a-samples.git
+echo "GOOGLE_API_KEY=your_api_key_here" > src/.env
 
+# Run
 cd a2a-samples/demo/ui
 uv run main.py
 ```
