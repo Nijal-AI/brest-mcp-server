@@ -2,33 +2,41 @@
 import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-
+from mcp.client.streamable_http import streamablehttp_client
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import AzureChatOpenAI
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from dotenv import load_dotenv
 
-
+load_dotenv()
 async def process_query(query: str):
-    server_params = StdioServerParameters(
-        command="python",
-        # Make sure to update to the full absolute path to your math_server.py file
-        args=["src/server.py"],
-    )
-
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            # Initialize the connection
-            await session.initialize()
-
-            # Get tools
-            tools = await load_mcp_tools(session)
-            model = AzureChatOpenAI(azure_deployment="gpt-4o-mini")  # Azure deployment name
-            # Create and run the agent
-            agent = create_react_agent(model, tools)
-            agent_response = await agent.ainvoke({"messages": query})
+    try:
+        print("Starting process_query...")
+        client = MultiServerMCPClient(
+            { "weather": {
+                    # Ensure you start your weather server on port 8000
+                    "url": "https://app-ff8b1b21-92e9-4638-9f06-5c1311ce97a3.cleverapps.io/mcp",
+                    "transport": "streamable_http",
+                },
+            }
+        )
+        tools = await client.get_tools()
+        print(f"Loaded {len(tools)} tools")
+        model = AzureChatOpenAI(azure_deployment="gpt-4o-mini")  # Azure deployment name
+        agent = create_react_agent(model, tools)
+        print("Invoking the agent with the provided query...")
+        try:
+            agent_response = await agent.ainvoke({"messages": [{"role": "user", "content": query}]})
+            print("Agent invocation successful.")
             print(agent_response)
             return agent_response
-
+        except Exception as agent_error:
+            print(f"Error during agent invocation: {str(agent_error)}")
+            return {"messages": [{"content": "An error occurred while invoking the agent."}]}
+    except Exception as e:
+        print(f"Error in process_query: {str(e)}")
+        return {"messages": [{"content": "An error occurred while processing your query."}]}
 
 async def chat_loop():
     """Run an interactive chat loop"""
@@ -46,14 +54,13 @@ async def chat_loop():
             print("\n" + response["messages"][-1].content)
 
         except Exception as e:
-            print(f"\nError: {str(e)}")
-
+            print(f"\nError in chat_loop: {str(e)}")
 
 async def main():
-    if len(sys.argv) < 2:
-        print("Usage: python client.py <path_to_server_script>")
-        sys.exit(1)
-    await chat_loop()
+    try:
+        await chat_loop()
+    except Exception as e:
+        print(f"Unhandled error in main: {str(e)}")
 
 
 if __name__ == "__main__":

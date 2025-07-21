@@ -1,4 +1,8 @@
 from .server import mcp
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the MCP server."""
     mcp.run()
+
+if __name__ == "__main__":
+    main()
