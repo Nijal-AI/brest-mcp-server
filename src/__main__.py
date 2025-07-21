@@ -1,5 +1,4 @@
 from .server import mcp
 
-
-def main():
+if __name__ == "__main__":
     mcp.run()
